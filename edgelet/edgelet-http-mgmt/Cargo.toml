@@ -22,6 +22,7 @@ url = "2"
 edgelet-core = { path = "../edgelet-core" }
 edgelet-http = { path = "../edgelet-http" }
 edgelet-settings = { path = "../edgelet-settings" }
+edgelet-utils = { path = "../edgelet-utils" }
 support-bundle = { path = "../support-bundle" }
 
 aziot-identity-client-async = { git = "https://github.com/Azure/iot-identity-service", branch = "main" }
