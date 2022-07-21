@@ -7,7 +7,7 @@ mod system_info;
 
 #[cfg(not(test))]
 use aziot_identity_client_async::Client as IdentityClient;
-use edgelet_utils::migc_persistence::MIGCPersistence;
+use edgelet_docker::MIGCPersistence;
 
 #[cfg(test)]
 use test_common::client::IdentityClient;

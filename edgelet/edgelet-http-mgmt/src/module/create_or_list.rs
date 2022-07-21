@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft. All rights reserved.
 
-use edgelet_utils::migc_persistence::MIGCPersistence;
+use edgelet_docker::MIGCPersistence;
 
 pub(crate) struct Route<M>
 where

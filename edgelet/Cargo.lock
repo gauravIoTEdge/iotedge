@@ -649,6 +649,7 @@ dependencies = [
  "aziot-identity-common",
  "aziot-identity-common-http",
  "edgelet-core",
+ "edgelet-docker",
  "edgelet-http",
  "edgelet-settings",
  "edgelet-test-utils",

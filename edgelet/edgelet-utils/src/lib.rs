@@ -13,13 +13,11 @@
 )]
 
 mod error;
-mod migc_persistence;
 mod yaml_file_source;
 
 use std::{collections::HashMap, net::IpAddr, str::FromStr};
 
 pub use crate::error::Error;
-pub use crate::migc_persistence::MIGCPersistence;
 pub use crate::yaml_file_source::YamlFileSource;
 
 #[inline]
