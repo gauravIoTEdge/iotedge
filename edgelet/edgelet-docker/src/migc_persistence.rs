@@ -31,9 +31,25 @@ impl MIGCPersistence {
         // from ID, derive image hash (might entail calling ModuleRuntime::list_with_details()) if hash is not readily available
 
         let guard = self.inner.lock().unwrap();
-        // read file contents into memory
-        // find the image hash (as key) and update the timestamp (as value)
-        // write it to the file
+
+        // read MIGC persistence file into in-mem map
+        // this map now contains all images deployed to the device (through an IoT Edge deployment)
+        let mut image_map = get_images_with_timestamp(guard.filename.clone())
+            .map_err(|e| e)
+            .unwrap();
+
+        let current_time = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap();
+
+        // TODO: add hash here
+        image_map.insert("".to_string(), current_time);
+
+        // write entries back to file
+        write_images_with_timestamp(&image_map, guard.filename.clone())
+            .map_err(|e| e)
+            .unwrap();
+
         drop(guard);
     }
 
