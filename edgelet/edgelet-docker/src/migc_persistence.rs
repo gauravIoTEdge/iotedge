@@ -27,14 +27,14 @@ impl MIGCPersistence {
         }
     }
 
-    pub fn write_image_to_file(&self, id: &str) {
+    pub fn write_image_to_file(&self, _id: &str) {
         // from ID, derive image hash (might entail calling ModuleRuntime::list_with_details()) if hash is not readily available
 
-        // get lock
+        let guard = self.inner.lock().unwrap();
         // read file contents into memory
         // find the image hash (as key) and update the timestamp (as value)
         // write it to the file
-        // release lock
+        drop(guard);
     }
 
     pub async fn prune_images_from_file(
@@ -43,7 +43,7 @@ impl MIGCPersistence {
             DockerModule<http_common::Connector>,
             edgelet_core::ModuleRuntimeState,
         )>,
-    ) -> HashMap<String, Duration> {
+    ) -> Result<HashMap<String, Duration>, Error> {
         let guard = self.inner.lock().unwrap();
 
         // read MIGC persistence file into in-mem map
@@ -69,7 +69,7 @@ impl MIGCPersistence {
         drop(guard);
 
         // these are the images we need to prune; MIGC file has already been updated
-        images_to_delete
+        Ok(images_to_delete)
     }
 }
 
@@ -102,7 +102,6 @@ fn write_images_with_timestamp(
     filename: String,
 ) -> Result<(), Error> {
     // instead of deleting existing entries from file, we just recreate it
-    // TODO: handle synchronization
     let mut file = std::fs::File::create(filename).unwrap();
 
     for (key, value) in state_to_persist {
