@@ -27,7 +27,7 @@ impl MIGCPersistence {
         }
     }
 
-    pub fn write_image_to_file(&self, _id: &str) {
+    pub fn record_image_use_timestamp(&self, _name_or_id: &str) {
         // from ID, derive image hash (might entail calling ModuleRuntime::list_with_details()) if hash is not readily available
 
         let guard = self.inner.lock().unwrap();
@@ -53,7 +53,7 @@ impl MIGCPersistence {
         drop(guard);
     }
 
-    pub async fn prune_images_from_file(
+    pub async fn prune_images_from_system(
         &self,
         running_modules: std::vec::Vec<(
             DockerModule<http_common::Connector>,

@@ -16,7 +16,7 @@ pub(crate) async fn run_until_shutdown(
     let mut gc_timer = tokio::time::interval(gc_period);
     gc_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-    log::info!("Starting MIGC...");
+    log::info!("Creating Image garbage Collection task");
 
     loop {
         if let Err(err) = garbage_collector(&settings, runtime, migc_persistence.clone()).await {
@@ -30,7 +30,7 @@ async fn garbage_collector(
     runtime: &edgelet_docker::DockerModuleRuntime<http_common::Connector>,
     migc_persistence: MIGCPersistence,
 ) -> Result<(), EdgedError> {
-    log::info!("Module Image Garbage Collection starting daily run");
+    log::info!("Image Garbage Collection starting daily run");
 
     // track images associated with extant containers
 
@@ -38,7 +38,7 @@ async fn garbage_collector(
     let running_modules = ModuleRuntime::list_with_details(runtime).await.unwrap();
 
     let image_map = migc_persistence
-        .prune_images_from_file(running_modules)
+        .prune_images_from_system(running_modules)
         .await
         .unwrap();
 
