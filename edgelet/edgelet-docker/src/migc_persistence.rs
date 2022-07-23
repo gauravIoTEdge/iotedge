@@ -76,13 +76,13 @@ impl MIGCPersistence {
         drop(guard);
     }
 
-    pub async fn prune_images_from_system(
+    pub async fn prune_images_from_file(
         &self,
         running_modules: std::vec::Vec<(
             DockerModule<http_common::Connector>,
             edgelet_core::ModuleRuntimeState,
         )>,
-    ) -> Result<HashMap<String, Duration>, Error> {
+    ) -> HashMap<String, Duration> {
         let guard = self.inner.lock().unwrap();
 
         // read MIGC persistence file into in-mem map
@@ -108,7 +108,7 @@ impl MIGCPersistence {
         drop(guard);
 
         // these are the images we need to prune; MIGC file has already been updated
-        Ok(images_to_delete)
+        images_to_delete
     }
 }
 
@@ -141,6 +141,7 @@ fn write_images_with_timestamp(
     filename: String,
 ) -> Result<(), Error> {
     // instead of deleting existing entries from file, we just recreate it
+    // TODO: handle synchronization
     let mut file = std::fs::File::create(filename).unwrap();
 
     for (key, value) in state_to_persist {
