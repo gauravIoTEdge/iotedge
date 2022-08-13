@@ -8,21 +8,21 @@ use std::time::Duration;
 pub struct ImagePruneSettings {
     #[serde(with = "humantime_serde")]
     /// how frequently images should be garbage collected
-    cleanup_recurrence: Duration,
+    cleanup_recurrence: Option<Duration>,
     #[serde(with = "humantime_serde")]
     /// minimum (unused) image "age" to be eligible for garbage collection
-    image_age_cleanup_threshold: Duration,
+    image_age_cleanup_threshold: Option<Duration>,
     /// time in "HH::MM" format when cleanup job runs
-    cleanup_time: String,
+    cleanup_time: Option<String>,
     // is image garbage collection enabled
     enabled: bool,
 }
 
 impl ImagePruneSettings {
     pub fn new(
-        cleanup_recurrence: Duration,
-        image_age_cleanup_threshold: Duration,
-        cleanup_time: String,
+        cleanup_recurrence: Option<Duration>,
+        image_age_cleanup_threshold: Option<Duration>,
+        cleanup_time: Option<String>,
         enabled: bool,
     ) -> ImagePruneSettings {
         ImagePruneSettings {
@@ -33,15 +33,15 @@ impl ImagePruneSettings {
         }
     }
 
-    pub fn cleanup_recurrence(&self) -> Duration {
+    pub fn cleanup_recurrence(&self) -> Option<Duration> {
         self.cleanup_recurrence
     }
 
-    pub fn image_age_cleanup_threshold(&self) -> Duration {
+    pub fn image_age_cleanup_threshold(&self) -> Option<Duration> {
         self.image_age_cleanup_threshold
     }
 
-    pub fn cleanup_time(&self) -> String {
+    pub fn cleanup_time(&self) -> Option<String> {
         self.cleanup_time.clone()
     }
 

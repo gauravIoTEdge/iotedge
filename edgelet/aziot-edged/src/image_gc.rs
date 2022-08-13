@@ -9,6 +9,8 @@ use edgelet_docker::ImagePruneData;
 use edgelet_settings::base::image::ImagePruneSettings;
 
 const TOTAL_MINS_IN_DAY: u32 = 1440;
+const DEFAULT_CLEANUP_TIME: &str = "00:00"; // midnight
+const DEFAULT_RECURRENCE_IN_SECS: std::time::Duration = Duration::from_secs(60 * 60 * 24); // 1 day
 
 pub(crate) async fn image_garbage_collect(
     edge_agent_bootstrap: String,
@@ -18,7 +20,10 @@ pub(crate) async fn image_garbage_collect(
 ) -> Result<(), EdgedError> {
     log::info!("Starting image auto-pruning task...");
 
-    let diff_in_secs: u32 = get_sleep_time_mins(&settings.cleanup_time()) * 60;
+    let cleanup_time = &mut settings.cleanup_time();
+    let cleanup_time = cleanup_time.get_or_insert(DEFAULT_CLEANUP_TIME.to_string());
+
+    let diff_in_secs: u32 = get_sleep_time_mins(cleanup_time) * 60;
     tokio::time::sleep(Duration::from_secs(diff_in_secs.into())).await;
 
     let mut bootstrap_image_id_option = None;
@@ -55,9 +60,11 @@ pub(crate) async fn image_garbage_collect(
         };
 
         // sleep till it's time to wake up based on recurrence (and on current time post-last-execution to avoid time drift)
-        let delay = settings.cleanup_recurrence()
+        let mut recurrence = settings.cleanup_recurrence();
+        let recurrence = *recurrence.get_or_insert(DEFAULT_RECURRENCE_IN_SECS);
+        let delay = recurrence
             - Duration::from_secs(
-                ((TOTAL_MINS_IN_DAY - get_sleep_time_mins(&settings.cleanup_time())) * 60).into(),
+                ((TOTAL_MINS_IN_DAY - get_sleep_time_mins(cleanup_time)) * 60).into(),
             );
         tokio::time::sleep(delay).await;
     }

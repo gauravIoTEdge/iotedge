@@ -92,6 +92,8 @@ impl ImagePruneData {
         &self,
         in_use_image_ids: HashSet<String>,
     ) -> Result<HashMap<String, Duration>, Error> {
+        const DEFAULT_MIN_AGE_IN_SECS: std::time::Duration = Duration::from_secs(60 * 60 * 24 * 7); // 7 days
+
         let guard = self
             .inner
             .lock()
@@ -118,7 +120,9 @@ impl ImagePruneData {
         let (images_to_delete, carry_over) = process_state(
             image_map,
             in_use_image_ids,
-            settings.image_age_cleanup_threshold(),
+            *settings
+                .image_age_cleanup_threshold()
+                .get_or_insert(DEFAULT_MIN_AGE_IN_SECS), // settings can't be None
         )?;
 
         /* ============================== */
@@ -294,9 +298,9 @@ mod tests {
         std::fs::create_dir(Path::new(&test_file_dir)).unwrap();
 
         let settings = ImagePruneSettings::new(
-            Duration::from_secs(30),
-            Duration::from_secs(10),
-            curr_time,
+            Some(Duration::from_secs(30)),
+            Some(Duration::from_secs(10)),
+            Some(curr_time),
             false,
         );
         let image_use_data = ImagePruneData::new(&test_file_dir, settings).unwrap();
@@ -410,9 +414,9 @@ mod tests {
 
         let curr_time: String = format!("{}{}", Utc::now().hour(), Utc::now().minute());
         let settings = ImagePruneSettings::new(
-            Duration::from_secs(30),
-            Duration::from_secs(5),
-            curr_time,
+            Some(Duration::from_secs(30)),
+            Some(Duration::from_secs(5)),
+            Some(curr_time),
             true,
         );
         let image_use_data = ImagePruneData::new(&test_file_dir, settings).unwrap();

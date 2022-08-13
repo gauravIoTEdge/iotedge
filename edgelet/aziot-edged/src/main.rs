@@ -101,9 +101,9 @@ async fn run() -> Result<(), EdgedError> {
         tokio::sync::mpsc::unbounded_channel::<ModuleAction>();
 
     let defaults = ImagePruneSettings::new(
-        Duration::from_secs(DEFAULT_RECURRENCE_IN_SECS),
-        Duration::from_secs(DEFAULT_MIN_AGE_IN_SECS),
-        DEFAULT_CLEANUP_TIME.to_string(),
+        Some(Duration::from_secs(DEFAULT_RECURRENCE_IN_SECS)),
+        Some(Duration::from_secs(DEFAULT_MIN_AGE_IN_SECS)),
+        Some(DEFAULT_CLEANUP_TIME.to_string()),
         true,
     );
 
@@ -115,8 +115,8 @@ async fn run() -> Result<(), EdgedError> {
         }
     };
 
-    // If settings are present in the config, they will always be validated (even if auto-pruning is disabled).
-    if validate_settings(gc_settings).is_err() {
+    let result = check_settings_and_populate(gc_settings);
+    if result.is_err() {
         std::process::exit(exitcode::CONFIG);
     }
 
@@ -306,28 +306,56 @@ fn set_signal_handlers(
     });
 }
 
-fn validate_settings(settings: &ImagePruneSettings) -> Result<(), EdgedError> {
-    if settings.cleanup_recurrence() < Duration::from_secs(60 * 60 * 24) {
-        log::error!(
-            "invalid settings provided in config: cleanup recurrence cannot be less than 1 day."
-        );
-        return Err(EdgedError::from_err(
-            "invalid settings provided in config",
-            edgelet_docker::Error::InvalidSettings(
-                "cleanup recurrence cannot be less than 1 day".to_string(),
-            ),
-        ));
+fn check_settings_and_populate(
+    settings: &ImagePruneSettings,
+) -> Result<ImagePruneSettings, EdgedError> {
+    let mut recurrence = Duration::from_secs(DEFAULT_RECURRENCE_IN_SECS);
+    let mut cleanup_time = DEFAULT_CLEANUP_TIME;
+    let mut min_age = Duration::from_secs(DEFAULT_MIN_AGE_IN_SECS);
+
+    if settings.cleanup_recurrence().is_some() {
+        // value cannot be none
+        recurrence = *settings.cleanup_recurrence().get_or_insert(recurrence);
+        if recurrence < Duration::from_secs(60 * 60 * 24) {
+            log::error!(
+                "invalid settings provided in config: cleanup recurrence cannot be less than 1 day."
+            );
+            return Err(EdgedError::from_err(
+                "invalid settings provided in config",
+                edgelet_docker::Error::InvalidSettings(
+                    "cleanup recurrence cannot be less than 1 day".to_string(),
+                ),
+            ));
+        }
     }
 
-    let times = NaiveTime::parse_from_str(&settings.cleanup_time(), "%H:%M");
-    if times.is_err() {
-        log::error!("invalid settings provided in config: invalid cleanup time, expected format is \"HH:MM\" in 24-hour format.");
-        return Err(EdgedError::new(edgelet_docker::Error::InvalidSettings(
-            "invalid cleanup time, expected format is \"HH:MM\" in 24-hour format".to_string(),
-        )));
+    if settings.cleanup_time().is_some() {
+        // value cannot be none
+        cleanup_time = &mut settings
+            .cleanup_time()
+            .get_or_insert(cleanup_time.to_string());
+        let times = NaiveTime::parse_from_str(cleanup_time, "%H:%M");
+        if times.is_err() {
+            log::error!("invalid settings provided in config: invalid cleanup time, expected format is \"HH:MM\" in 24-hour format.");
+            return Err(EdgedError::new(edgelet_docker::Error::InvalidSettings(
+                "invalid cleanup time, expected format is \"HH:MM\" in 24-hour format".to_string(),
+            )));
+        }
     }
 
-    Ok(())
+    if settings.image_age_cleanup_threshold().is_some() {
+        // value cannot be none
+        min_age = *settings
+            .image_age_cleanup_threshold()
+            .get_or_insert(min_age);
+    }
+
+    Ok(ImagePruneSettings::new(
+        Some(recurrence),
+        Some(min_age),
+        Some(cleanup_time.to_string()),
+        settings.is_enabled(),
+    ))
 }
 
 #[cfg(test)]
@@ -335,44 +363,72 @@ mod tests {
     use edgelet_settings::base::image::ImagePruneSettings;
     use std::time::Duration;
 
-    use crate::validate_settings;
+    use crate::check_settings_and_populate;
 
     #[test]
     fn test_validate_settings() {
-        let mut settings =
-            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "12345".to_string(), false);
+        let mut settings = ImagePruneSettings::new(
+            Some(Duration::MAX),
+            Some(Duration::MAX),
+            Some("12345".to_string()),
+            false,
+        );
 
-        let mut result = validate_settings(&settings);
+        let mut result = check_settings_and_populate(&settings);
         assert!(result.is_err());
 
-        settings =
-            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "abcde".to_string(), false);
-        result = validate_settings(&settings);
+        settings = ImagePruneSettings::new(
+            Some(Duration::MAX),
+            Some(Duration::MAX),
+            Some("abcde".to_string()),
+            false,
+        );
+        result = check_settings_and_populate(&settings);
         assert!(result.is_err());
 
-        settings =
-            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "26:30".to_string(), false);
-        result = validate_settings(&settings);
+        settings = ImagePruneSettings::new(
+            Some(Duration::MAX),
+            Some(Duration::MAX),
+            Some("26:30".to_string()),
+            false,
+        );
+        result = check_settings_and_populate(&settings);
         assert!(result.is_err());
 
-        settings =
-            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "16:61".to_string(), false);
-        result = validate_settings(&settings);
+        settings = ImagePruneSettings::new(
+            Some(Duration::MAX),
+            Some(Duration::MAX),
+            Some("16:61".to_string()),
+            false,
+        );
+        result = check_settings_and_populate(&settings);
         assert!(result.is_err());
 
-        settings =
-            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "23:333".to_string(), false);
-        result = validate_settings(&settings);
+        settings = ImagePruneSettings::new(
+            Some(Duration::MAX),
+            Some(Duration::MAX),
+            Some("23:333".to_string()),
+            false,
+        );
+        result = check_settings_and_populate(&settings);
         assert!(result.is_err());
 
-        settings =
-            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "2:033".to_string(), false);
-        result = validate_settings(&settings);
+        settings = ImagePruneSettings::new(
+            Some(Duration::MAX),
+            Some(Duration::MAX),
+            Some("2:033".to_string()),
+            false,
+        );
+        result = check_settings_and_populate(&settings);
         assert!(result.is_err());
 
-        settings =
-            ImagePruneSettings::new(Duration::MAX, Duration::MAX, ":::00".to_string(), false);
-        result = validate_settings(&settings);
+        settings = ImagePruneSettings::new(
+            Some(Duration::MAX),
+            Some(Duration::MAX),
+            Some(":::00".to_string()),
+            false,
+        );
+        result = check_settings_and_populate(&settings);
         assert!(result.is_err());
     }
 }

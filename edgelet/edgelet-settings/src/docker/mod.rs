@@ -304,13 +304,16 @@ mod tests {
         assert!(image_prune_settings.is_enabled());
         assert_eq!(
             image_prune_settings.image_age_cleanup_threshold(),
-            Duration::from_secs(1440 * 60 * 3 * 7)
+            Some(Duration::from_secs(1440 * 60 * 3 * 7))
         );
         assert_eq!(
             image_prune_settings.cleanup_recurrence(),
-            Duration::from_secs(1440 * 60 * 3)
+            Some(Duration::from_secs(1440 * 60 * 3))
         );
-        assert_eq!(image_prune_settings.cleanup_time(), "10:00");
+        assert_eq!(
+            image_prune_settings.cleanup_time(),
+            Some("10:00".to_string())
+        );
     }
 
     #[test]
