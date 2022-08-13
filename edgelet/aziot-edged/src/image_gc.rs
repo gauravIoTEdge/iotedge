@@ -3,46 +3,20 @@
 use std::{collections::HashSet, time::Duration};
 
 use crate::error::Error as EdgedError;
-use chrono::{NaiveTime, Timelike};
+use chrono::Timelike;
 use edgelet_core::{ModuleRegistry, ModuleRuntime};
 use edgelet_docker::ImagePruneData;
-use edgelet_settings::{base::image::ImagePruneSettings, RuntimeSettings};
+use edgelet_settings::base::image::ImagePruneSettings;
 
 const TOTAL_MINS_IN_DAY: u32 = 1440;
-const DEFAULT_CLEANUP_TIME: &str = "00:00"; // midnight
-const DEFAULT_RECURRENCE_IN_SECS: u64 = 60 * 60 * 24; // 1 day
-const DEFAULT_MIN_AGE_IN_SECS: u64 = 60 * 60 * 24 * 7; // 7 days
 
 pub(crate) async fn image_garbage_collect(
-    settings: edgelet_settings::Settings,
+    edge_agent_bootstrap: String,
+    settings: ImagePruneSettings,
     runtime: &edgelet_docker::DockerModuleRuntime<http_common::Connector>,
     image_use_data: ImagePruneData,
 ) -> Result<(), EdgedError> {
     log::info!("Starting image auto-pruning task...");
-
-    let edge_agent_bootstrap: String = settings.agent().config().image().to_string();
-
-    let defaults = ImagePruneSettings::new(
-        Duration::from_secs(DEFAULT_RECURRENCE_IN_SECS),
-        Duration::from_secs(DEFAULT_MIN_AGE_IN_SECS),
-        DEFAULT_CLEANUP_TIME.to_string(),
-        true,
-    );
-
-    // TODO: Can be left as option
-    let settings = match settings.image_garbage_collection() {
-        Some(parsed) => parsed,
-        None => {
-            log::info!("No [image_garbage_collection] settings found in config.toml, using default settings");
-            &defaults
-        }
-    };
-
-    // If settings are present in the config, they will always be validated (even if auto-pruning is disabled).
-    // TODO: should be moved either to settings struct or image_prune_data_struct <--- probably here
-    if validate_settings(settings).is_err() {
-        std::process::exit(exitcode::CONFIG);
-    }
 
     let diff_in_secs: u32 = get_sleep_time_mins(&settings.cleanup_time()) * 60;
     tokio::time::sleep(Duration::from_secs(diff_in_secs.into())).await;
@@ -66,21 +40,19 @@ pub(crate) async fn image_garbage_collect(
             }
         }
 
-        if settings.is_enabled() {
-            if let Err(err) = remove_unused_images(
-                runtime,
-                image_use_data.clone(),
-                bootstrap_image_id_option.clone(),
-                is_bootstrap_image_deleted,
-            )
-            .await
-            {
-                return Err(EdgedError::new(format!(
-                    "Error in image auto-pruning task: {}",
-                    err
-                )));
-            };
-        }
+        if let Err(err) = remove_unused_images(
+            runtime,
+            image_use_data.clone(),
+            bootstrap_image_id_option.clone(),
+            is_bootstrap_image_deleted,
+        )
+        .await
+        {
+            return Err(EdgedError::new(format!(
+                "Error in image auto-pruning task: {}",
+                err
+            )));
+        };
 
         // sleep till it's time to wake up based on recurrence (and on current time post-last-execution to avoid time drift)
         let delay = settings.cleanup_recurrence()
@@ -209,30 +181,6 @@ async fn get_bootstrap_image_id(
     Ok((bootstrap_image_id, is_bootstrap_deleted))
 }
 
-fn validate_settings(settings: &ImagePruneSettings) -> Result<(), EdgedError> {
-    if settings.cleanup_recurrence() < Duration::from_secs(60 * 60 * 24) {
-        log::error!(
-            "invalid settings provided in config: cleanup recurrence cannot be less than 1 day."
-        );
-        return Err(EdgedError::from_err(
-            "invalid settings provided in config",
-            edgelet_docker::Error::InvalidSettings(
-                "cleanup recurrence cannot be less than 1 day".to_string(),
-            ),
-        ));
-    }
-
-    let times = NaiveTime::parse_from_str(&settings.cleanup_time(), "%H:%M");
-    if times.is_err() {
-        log::error!("invalid settings provided in config: invalid cleanup time, expected format is \"HH:MM\" in 24-hour format.");
-        return Err(EdgedError::new(edgelet_docker::Error::InvalidSettings(
-            "invalid cleanup time, expected format is \"HH:MM\" in 24-hour format".to_string(),
-        )));
-    }
-
-    Ok(())
-}
-
 fn get_sleep_time_mins(times: &str) -> u32 {
     // if string is empty, or if there's an input error, we fall back to default (midnight)
     let cleanup_mins = if times.is_empty() {
@@ -258,55 +206,10 @@ fn get_sleep_time_mins(times: &str) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use chrono::Timelike;
-    use edgelet_settings::base::image::ImagePruneSettings;
-
-    use crate::image_gc::validate_settings;
-
     use super::get_sleep_time_mins;
+    use chrono::Timelike;
 
     const TOTAL_MINS_IN_DAY: u32 = 1440;
-
-    #[test]
-    fn test_validate_settings() {
-        let mut settings =
-            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "12345".to_string(), false);
-
-        let mut result = validate_settings(&settings);
-        assert!(result.is_err());
-
-        settings =
-            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "abcde".to_string(), false);
-        result = validate_settings(&settings);
-        assert!(result.is_err());
-
-        settings =
-            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "26:30".to_string(), false);
-        result = validate_settings(&settings);
-        assert!(result.is_err());
-
-        settings =
-            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "16:61".to_string(), false);
-        result = validate_settings(&settings);
-        assert!(result.is_err());
-
-        settings =
-            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "23:333".to_string(), false);
-        result = validate_settings(&settings);
-        assert!(result.is_err());
-
-        settings =
-            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "2:033".to_string(), false);
-        result = validate_settings(&settings);
-        assert!(result.is_err());
-
-        settings =
-            ImagePruneSettings::new(Duration::MAX, Duration::MAX, ":::00".to_string(), false);
-        result = validate_settings(&settings);
-        assert!(result.is_err());
-    }
 
     #[test]
     fn test_get_sleep_time_mins() {

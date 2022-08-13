@@ -10,13 +10,18 @@ mod provision;
 mod watchdog;
 mod workload_manager;
 
-use std::sync::atomic;
+use std::{sync::atomic, time::Duration};
 
+use chrono::NaiveTime;
 use edgelet_core::{module::ModuleAction, ModuleRuntime, WatchdogAction};
 use edgelet_docker::{ImagePruneData, MakeModuleRuntime};
-use edgelet_settings::RuntimeSettings;
+use edgelet_settings::{base::image::ImagePruneSettings, RuntimeSettings};
 
 use crate::{error::Error as EdgedError, workload_manager::WorkloadManager};
+
+const DEFAULT_CLEANUP_TIME: &str = "00:00"; // midnight
+const DEFAULT_RECURRENCE_IN_SECS: u64 = 60 * 60 * 24; // 1 day
+const DEFAULT_MIN_AGE_IN_SECS: u64 = 60 * 60 * 24 * 7; // 7 days
 
 #[tokio::main]
 async fn main() {
@@ -87,7 +92,7 @@ async fn run() -> Result<(), EdgedError> {
 
     let device_info = provision::get_device_info(
         &identity_client,
-        settings.auto_reprovisioning_mode(),
+        settings.clone().auto_reprovisioning_mode(),
         &cache_dir,
     )
     .await?;
@@ -95,7 +100,27 @@ async fn run() -> Result<(), EdgedError> {
     let (create_socket_channel_snd, create_socket_channel_rcv) =
         tokio::sync::mpsc::unbounded_channel::<ModuleAction>();
 
-    let image_use_data = ImagePruneData::new(&gc_dir, settings.image_garbage_collection().clone())
+    let defaults = ImagePruneSettings::new(
+        Duration::from_secs(DEFAULT_RECURRENCE_IN_SECS),
+        Duration::from_secs(DEFAULT_MIN_AGE_IN_SECS),
+        DEFAULT_CLEANUP_TIME.to_string(),
+        true,
+    );
+
+    let gc_settings = match settings.image_garbage_collection() {
+        Some(parsed) => parsed,
+        None => {
+            log::info!("No [image_garbage_collection] settings found in config.toml, using default settings");
+            &defaults
+        }
+    };
+
+    // If settings are present in the config, they will always be validated (even if auto-pruning is disabled).
+    if validate_settings(gc_settings).is_err() {
+        std::process::exit(exitcode::CONFIG);
+    }
+
+    let image_use_data = ImagePruneData::new(&gc_dir, gc_settings.clone())
         .map_err(|err| EdgedError::from_err("Failed to set up image garbage collection", err))?;
 
     let runtime = edgelet_docker::DockerModuleRuntime::make_runtime(
@@ -146,7 +171,9 @@ async fn run() -> Result<(), EdgedError> {
 
     // Resolve the parent hostname used to pull Edge Agent. This translates '$upstream' into the
     // appropriate hostname.
-    let settings = settings.agent_upstream_resolve(&device_info.gateway_host);
+    let settings = settings
+        .clone()
+        .agent_upstream_resolve(&device_info.gateway_host);
 
     // Start management and workload sockets.
     let management_shutdown = management::start(
@@ -162,27 +189,46 @@ async fn run() -> Result<(), EdgedError> {
     // Set signal handlers for SIGTERM and SIGINT.
     set_signal_handlers(watchdog_tx);
 
-    let watchdog = watchdog::run_until_shutdown(
-        settings.clone(),
-        &device_info,
-        runtime.clone(),
-        &identity_client,
-        watchdog_rx,
-    );
-    let image_gc = image_gc::image_garbage_collect(settings.clone(), &runtime, image_use_data);
-
     let shutdown_reason: WatchdogAction;
-    tokio::select! {
-        watchdog_finished = watchdog => {
-            log::info!("watchdog finished");
-            shutdown_reason = watchdog_finished?;
-        },
-        image_gc_finished = image_gc => {
-            log::error!("image garbage collection stopped unexpectedly");
-            image_gc_finished?;
-            return Err(EdgedError::new("image garbage collection unexpectedly stopped"));
-        }
-    };
+
+    if gc_settings.is_enabled() {
+        let edge_agent_bootstrap: String = settings.agent().config().image().to_string();
+        let image_gc = image_gc::image_garbage_collect(
+            edge_agent_bootstrap,
+            gc_settings.clone(),
+            &runtime,
+            image_use_data,
+        );
+
+        let watchdog = watchdog::run_until_shutdown(
+            settings.clone(),
+            &device_info,
+            runtime.clone(),
+            &identity_client,
+            watchdog_rx,
+        );
+
+        tokio::select! {
+            watchdog_finished = watchdog => {
+                log::info!("watchdog finished");
+                shutdown_reason = watchdog_finished?;
+            },
+            image_gc_finished = image_gc => {
+                log::error!("image garbage collection stopped unexpectedly");
+                image_gc_finished?;
+                return Err(EdgedError::new("image garbage collection unexpectedly stopped"));
+            }
+        };
+    } else {
+        shutdown_reason = watchdog::run_until_shutdown(
+            settings.clone(),
+            &device_info,
+            runtime.clone(),
+            &identity_client,
+            watchdog_rx,
+        )
+        .await?;
+    }
 
     log::info!("Stopping management API...");
     management_shutdown
@@ -258,4 +304,75 @@ fn set_signal_handlers(
         // Ignore this Result, as the process will be shutting down anyways.
         let _ = sigterm_sender.send(edgelet_core::WatchdogAction::Signal);
     });
+}
+
+fn validate_settings(settings: &ImagePruneSettings) -> Result<(), EdgedError> {
+    if settings.cleanup_recurrence() < Duration::from_secs(60 * 60 * 24) {
+        log::error!(
+            "invalid settings provided in config: cleanup recurrence cannot be less than 1 day."
+        );
+        return Err(EdgedError::from_err(
+            "invalid settings provided in config",
+            edgelet_docker::Error::InvalidSettings(
+                "cleanup recurrence cannot be less than 1 day".to_string(),
+            ),
+        ));
+    }
+
+    let times = NaiveTime::parse_from_str(&settings.cleanup_time(), "%H:%M");
+    if times.is_err() {
+        log::error!("invalid settings provided in config: invalid cleanup time, expected format is \"HH:MM\" in 24-hour format.");
+        return Err(EdgedError::new(edgelet_docker::Error::InvalidSettings(
+            "invalid cleanup time, expected format is \"HH:MM\" in 24-hour format".to_string(),
+        )));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use edgelet_settings::base::image::ImagePruneSettings;
+    use std::time::Duration;
+
+    use crate::validate_settings;
+
+    #[test]
+    fn test_validate_settings() {
+        let mut settings =
+            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "12345".to_string(), false);
+
+        let mut result = validate_settings(&settings);
+        assert!(result.is_err());
+
+        settings =
+            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "abcde".to_string(), false);
+        result = validate_settings(&settings);
+        assert!(result.is_err());
+
+        settings =
+            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "26:30".to_string(), false);
+        result = validate_settings(&settings);
+        assert!(result.is_err());
+
+        settings =
+            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "16:61".to_string(), false);
+        result = validate_settings(&settings);
+        assert!(result.is_err());
+
+        settings =
+            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "23:333".to_string(), false);
+        result = validate_settings(&settings);
+        assert!(result.is_err());
+
+        settings =
+            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "2:033".to_string(), false);
+        result = validate_settings(&settings);
+        assert!(result.is_err());
+
+        settings =
+            ImagePruneSettings::new(Duration::MAX, Duration::MAX, ":::00".to_string(), false);
+        result = validate_settings(&settings);
+        assert!(result.is_err());
+    }
 }
