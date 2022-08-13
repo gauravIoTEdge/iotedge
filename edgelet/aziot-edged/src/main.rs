@@ -310,7 +310,7 @@ fn check_settings_and_populate(
     settings: &ImagePruneSettings,
 ) -> Result<ImagePruneSettings, EdgedError> {
     let mut recurrence = Duration::from_secs(DEFAULT_RECURRENCE_IN_SECS);
-    let mut cleanup_time = DEFAULT_CLEANUP_TIME;
+    let cleanup_time = DEFAULT_CLEANUP_TIME.to_string();
     let mut min_age = Duration::from_secs(DEFAULT_MIN_AGE_IN_SECS);
 
     if settings.cleanup_recurrence().is_some() {
@@ -330,11 +330,12 @@ fn check_settings_and_populate(
     }
 
     if settings.cleanup_time().is_some() {
-        // value cannot be none
-        cleanup_time = &mut settings
-            .cleanup_time()
-            .get_or_insert(cleanup_time.to_string());
-        let times = NaiveTime::parse_from_str(cleanup_time, "%H:%M");
+        let cleanup_time = match settings.cleanup_time() {
+            Some(ct) => ct,
+            None => DEFAULT_CLEANUP_TIME.to_string(),
+        };
+
+        let times = NaiveTime::parse_from_str(&cleanup_time, "%H:%M");
         if times.is_err() {
             log::error!("invalid settings provided in config: invalid cleanup time, expected format is \"HH:MM\" in 24-hour format.");
             return Err(EdgedError::new(edgelet_docker::Error::InvalidSettings(
@@ -353,7 +354,7 @@ fn check_settings_and_populate(
     Ok(ImagePruneSettings::new(
         Some(recurrence),
         Some(min_age),
-        Some(cleanup_time.to_string()),
+        Some(cleanup_time),
         settings.is_enabled(),
     ))
 }
