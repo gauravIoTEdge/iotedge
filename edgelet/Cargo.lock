@@ -120,6 +120,7 @@ dependencies = [
  "edgelet-http",
  "edgelet-http-mgmt",
  "edgelet-http-workload",
+ "edgelet-image-cleanup",
  "edgelet-settings",
  "edgelet-utils",
  "exitcode",
@@ -714,6 +715,21 @@ dependencies = [
  "test-common",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "edgelet-image-cleanup"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "edgelet-core",
+ "edgelet-docker",
+ "edgelet-settings",
+ "http-common",
+ "log",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

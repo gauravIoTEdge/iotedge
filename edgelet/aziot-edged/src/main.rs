@@ -4,7 +4,6 @@
 #![warn(clippy::all, clippy::pedantic)]
 
 mod error;
-mod image_gc;
 mod management;
 mod provision;
 mod watchdog;
@@ -15,6 +14,8 @@ use std::{sync::atomic, time::Duration};
 use chrono::NaiveTime;
 use edgelet_core::{module::ModuleAction, ModuleRuntime, WatchdogAction};
 use edgelet_docker::{ImagePruneData, MakeModuleRuntime};
+use edgelet_image_cleanup::error::ImageCleanupError;
+use edgelet_image_cleanup::image_gc;
 use edgelet_settings::{base::image::ImagePruneSettings, RuntimeSettings};
 
 use crate::{error::Error as EdgedError, workload_manager::WorkloadManager};
@@ -191,44 +192,33 @@ async fn run() -> Result<(), EdgedError> {
 
     let shutdown_reason: WatchdogAction;
 
-    if gc_settings.is_enabled() {
-        let edge_agent_bootstrap: String = settings.agent().config().image().to_string();
-        let image_gc = image_gc::image_garbage_collect(
-            edge_agent_bootstrap,
-            gc_settings.clone(),
-            &runtime,
-            image_use_data,
-        );
+    let watchdog = watchdog::run_until_shutdown(
+        settings.clone(),
+        &device_info,
+        runtime.clone(),
+        &identity_client,
+        watchdog_rx,
+    );
 
-        let watchdog = watchdog::run_until_shutdown(
-            settings.clone(),
-            &device_info,
-            runtime.clone(),
-            &identity_client,
-            watchdog_rx,
-        );
+    let edge_agent_bootstrap: String = settings.agent().config().image().to_string();
+    let image_gc = image_gc::image_garbage_collect(
+        edge_agent_bootstrap,
+        gc_settings.clone(),
+        &runtime,
+        image_use_data,
+    );
 
-        tokio::select! {
-            watchdog_finished = watchdog => {
-                log::info!("watchdog finished");
-                shutdown_reason = watchdog_finished?;
-            },
-            image_gc_finished = image_gc => {
-                log::error!("image garbage collection stopped unexpectedly");
-                image_gc_finished?;
-                return Err(EdgedError::new("image garbage collection unexpectedly stopped"));
-            }
-        };
-    } else {
-        shutdown_reason = watchdog::run_until_shutdown(
-            settings.clone(),
-            &device_info,
-            runtime.clone(),
-            &identity_client,
-            watchdog_rx,
-        )
-        .await?;
-    }
+    tokio::select! {
+        watchdog_finished = watchdog => {
+            log::info!("watchdog finished");
+            shutdown_reason = watchdog_finished?;
+        },
+        image_gc_finished = image_gc => {
+            let err_msg = "image garbage collection stopped unexpectedly";
+            image_gc_finished.map_err(|e| EdgedError::new(e))?;
+            return Err(EdgedError::new(err_msg));
+        }
+    };
 
     log::info!("Stopping management API...");
     management_shutdown
@@ -308,7 +298,7 @@ fn set_signal_handlers(
 
 fn check_settings_and_populate(
     settings: &ImagePruneSettings,
-) -> Result<ImagePruneSettings, EdgedError> {
+) -> Result<ImagePruneSettings, ImageCleanupError> {
     let mut recurrence = Duration::from_secs(DEFAULT_RECURRENCE_IN_SECS);
     let cleanup_time = DEFAULT_CLEANUP_TIME.to_string();
     let mut min_age = Duration::from_secs(DEFAULT_MIN_AGE_IN_SECS);
@@ -317,14 +307,8 @@ fn check_settings_and_populate(
         // value cannot be none
         recurrence = *settings.cleanup_recurrence().get_or_insert(recurrence);
         if recurrence < Duration::from_secs(60 * 60 * 24) {
-            log::error!(
-                "invalid settings provided in config: cleanup recurrence cannot be less than 1 day."
-            );
-            return Err(EdgedError::from_err(
-                "invalid settings provided in config",
-                edgelet_docker::Error::InvalidSettings(
-                    "cleanup recurrence cannot be less than 1 day".to_string(),
-                ),
+            return Err(ImageCleanupError::InvalidConfiguration(
+                "cleanup recurrence cannot be less than 1 day".to_string(),
             ));
         }
     }
@@ -337,10 +321,9 @@ fn check_settings_and_populate(
 
         let times = NaiveTime::parse_from_str(&cleanup_time, "%H:%M");
         if times.is_err() {
-            log::error!("invalid settings provided in config: invalid cleanup time, expected format is \"HH:MM\" in 24-hour format.");
-            return Err(EdgedError::new(edgelet_docker::Error::InvalidSettings(
+            return Err(ImageCleanupError::InvalidConfiguration(
                 "invalid cleanup time, expected format is \"HH:MM\" in 24-hour format".to_string(),
-            )));
+            ));
         }
     }
 
