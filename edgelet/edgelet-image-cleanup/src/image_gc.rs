@@ -12,7 +12,6 @@ use crate::error::ImageCleanupError;
 const TOTAL_MINS_IN_DAY: u32 = 1440;
 const DEFAULT_CLEANUP_TIME: &str = "00:00"; // midnight
 const DEFAULT_RECURRENCE_IN_SECS: std::time::Duration = Duration::from_secs(60 * 60 * 24); // 1 day
-const MIN_CLEANUP_RECURRENCE: Duration = Duration::from_secs(60 * 60 * 24); // 1 day
 
 pub async fn image_garbage_collect(
     edge_agent_bootstrap: String,
@@ -22,7 +21,9 @@ pub async fn image_garbage_collect(
 ) -> Result<(), ImageCleanupError> {
     log::info!("Starting image auto-pruning task...");
 
-    if !settings.is_enabled() {
+    let is_enabled: bool = *settings.is_enabled().get_or_insert(true);
+
+    if !is_enabled {
         return std::future::pending().await;
     }
 
@@ -138,7 +139,6 @@ async fn get_bootstrap_image_id(
     runtime: &edgelet_docker::DockerModuleRuntime<http_common::Connector>,
     edge_agent_bootstrap: String,
 ) -> Result<(String, bool), ImageCleanupError> {
-
     let image_name_to_id = ModuleRuntime::list_images(runtime)
         .await
         .map_err(ImageCleanupError::ListImages)?;

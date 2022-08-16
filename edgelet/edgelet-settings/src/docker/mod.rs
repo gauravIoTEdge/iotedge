@@ -301,7 +301,7 @@ mod tests {
 
         let settings = Settings::new().unwrap();
         let image_prune_settings = settings.image_garbage_collection().clone().unwrap();
-        assert!(image_prune_settings.is_enabled());
+        assert!(image_prune_settings.is_enabled().unwrap());
         assert_eq!(
             image_prune_settings.image_age_cleanup_threshold(),
             Some(Duration::from_secs(1440 * 60 * 3 * 7))

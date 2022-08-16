@@ -23,6 +23,7 @@ use crate::{error::Error as EdgedError, workload_manager::WorkloadManager};
 const DEFAULT_CLEANUP_TIME: &str = "00:00"; // midnight
 const DEFAULT_RECURRENCE_IN_SECS: u64 = 60 * 60 * 24; // 1 day
 const DEFAULT_MIN_AGE_IN_SECS: u64 = 60 * 60 * 24 * 7; // 7 days
+const MIN_CLEANUP_RECURRENCE: Duration = Duration::from_secs(60 * 60 * 24); // 1 day
 
 #[tokio::main]
 async fn main() {
@@ -105,7 +106,7 @@ async fn run() -> Result<(), EdgedError> {
         Some(Duration::from_secs(DEFAULT_RECURRENCE_IN_SECS)),
         Some(Duration::from_secs(DEFAULT_MIN_AGE_IN_SECS)),
         Some(DEFAULT_CLEANUP_TIME.to_string()),
-        true,
+        Some(true),
     );
 
     let gc_settings = match settings.image_garbage_collection() {
@@ -215,7 +216,7 @@ async fn run() -> Result<(), EdgedError> {
         },
         image_gc_finished = image_gc => {
             let err_msg = "image garbage collection stopped unexpectedly";
-            image_gc_finished.map_err(|e| EdgedError::new(e))?;
+            image_gc_finished.map_err(|e| EdgedError::from_err(err_msg, e))?;
             return Err(EdgedError::new(err_msg));
         }
     };
@@ -230,7 +231,6 @@ async fn run() -> Result<(), EdgedError> {
         .send(())
         .expect("workload API shutdown receiver was dropped");
 
-    // Wait up to 10 seconds for all server tasks to exit.
     let shutdown_timeout = std::time::Duration::from_secs(10);
     let poll_period = std::time::Duration::from_millis(100);
     let mut wait_time = std::time::Duration::from_millis(0);
@@ -302,11 +302,15 @@ fn check_settings_and_populate(
     let mut recurrence = Duration::from_secs(DEFAULT_RECURRENCE_IN_SECS);
     let cleanup_time = DEFAULT_CLEANUP_TIME.to_string();
     let mut min_age = Duration::from_secs(DEFAULT_MIN_AGE_IN_SECS);
+    let mut enabled = true;
+
+    if settings.is_enabled().is_some() {
+        enabled = *settings.is_enabled().get_or_insert(enabled);
+    }
 
     if settings.cleanup_recurrence().is_some() {
-        // value cannot be none
         recurrence = *settings.cleanup_recurrence().get_or_insert(recurrence);
-        if recurrence < Duration::from_secs(60 * 60 * 24) {
+        if recurrence < MIN_CLEANUP_RECURRENCE {
             return Err(ImageCleanupError::InvalidConfiguration(
                 "cleanup recurrence cannot be less than 1 day".to_string(),
             ));
@@ -328,7 +332,6 @@ fn check_settings_and_populate(
     }
 
     if settings.image_age_cleanup_threshold().is_some() {
-        // value cannot be none
         min_age = *settings
             .image_age_cleanup_threshold()
             .get_or_insert(min_age);
@@ -338,7 +341,7 @@ fn check_settings_and_populate(
         Some(recurrence),
         Some(min_age),
         Some(cleanup_time),
-        settings.is_enabled(),
+        Some(enabled),
     ))
 }
 
@@ -355,7 +358,7 @@ mod tests {
             Some(Duration::MAX),
             Some(Duration::MAX),
             Some("12345".to_string()),
-            false,
+            Some(false),
         );
 
         let mut result = check_settings_and_populate(&settings);
@@ -365,7 +368,7 @@ mod tests {
             Some(Duration::MAX),
             Some(Duration::MAX),
             Some("abcde".to_string()),
-            false,
+            Some(false),
         );
         result = check_settings_and_populate(&settings);
         assert!(result.is_err());
@@ -374,7 +377,7 @@ mod tests {
             Some(Duration::MAX),
             Some(Duration::MAX),
             Some("26:30".to_string()),
-            false,
+            Some(false),
         );
         result = check_settings_and_populate(&settings);
         assert!(result.is_err());
@@ -383,7 +386,7 @@ mod tests {
             Some(Duration::MAX),
             Some(Duration::MAX),
             Some("16:61".to_string()),
-            false,
+            Some(false),
         );
         result = check_settings_and_populate(&settings);
         assert!(result.is_err());
@@ -392,7 +395,7 @@ mod tests {
             Some(Duration::MAX),
             Some(Duration::MAX),
             Some("23:333".to_string()),
-            false,
+            Some(false),
         );
         result = check_settings_and_populate(&settings);
         assert!(result.is_err());
@@ -401,7 +404,7 @@ mod tests {
             Some(Duration::MAX),
             Some(Duration::MAX),
             Some("2:033".to_string()),
-            false,
+            Some(false),
         );
         result = check_settings_and_populate(&settings);
         assert!(result.is_err());
@@ -410,7 +413,7 @@ mod tests {
             Some(Duration::MAX),
             Some(Duration::MAX),
             Some(":::00".to_string()),
-            false,
+            Some(false),
         );
         result = check_settings_and_populate(&settings);
         assert!(result.is_err());

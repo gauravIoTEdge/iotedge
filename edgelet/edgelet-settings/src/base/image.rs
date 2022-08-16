@@ -15,7 +15,7 @@ pub struct ImagePruneSettings {
     /// time in "HH::MM" format when cleanup job runs
     cleanup_time: Option<String>,
     // is image garbage collection enabled
-    enabled: bool,
+    enabled: Option<bool>,
 }
 
 impl ImagePruneSettings {
@@ -23,7 +23,7 @@ impl ImagePruneSettings {
         cleanup_recurrence: Option<Duration>,
         image_age_cleanup_threshold: Option<Duration>,
         cleanup_time: Option<String>,
-        enabled: bool,
+        enabled: Option<bool>,
     ) -> ImagePruneSettings {
         ImagePruneSettings {
             cleanup_recurrence,
@@ -45,7 +45,7 @@ impl ImagePruneSettings {
         self.cleanup_time.clone()
     }
 
-    pub fn is_enabled(&self) -> bool {
+    pub fn is_enabled(&self) -> Option<bool> {
         self.enabled
     }
 }

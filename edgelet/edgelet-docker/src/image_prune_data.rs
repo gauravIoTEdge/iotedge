@@ -301,7 +301,7 @@ mod tests {
             Some(Duration::from_secs(30)),
             Some(Duration::from_secs(10)),
             Some(curr_time),
-            false,
+            Some(false),
         );
         let image_use_data = ImagePruneData::new(&test_file_dir, settings).unwrap();
 
@@ -417,7 +417,7 @@ mod tests {
             Some(Duration::from_secs(30)),
             Some(Duration::from_secs(5)),
             Some(curr_time),
-            true,
+            Some(true),
         );
         let image_use_data = ImagePruneData::new(&test_file_dir, settings).unwrap();
 
