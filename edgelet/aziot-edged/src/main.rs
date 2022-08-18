@@ -14,13 +14,13 @@ use std::{sync::atomic, time::Duration};
 use chrono::NaiveTime;
 use edgelet_core::{module::ModuleAction, ModuleRuntime, WatchdogAction};
 use edgelet_docker::{ImagePruneData, MakeModuleRuntime};
-use edgelet_image_cleanup::{image_gc, error::ImageCleanupError};
-use edgelet_settings::{RuntimeSettings, base::image::ImagePruneSettings};
+use edgelet_image_cleanup::{error::ImageCleanupError, image_gc};
+use edgelet_settings::{base::image::ImagePruneSettings, RuntimeSettings};
 
 use crate::{error::Error as EdgedError, workload_manager::WorkloadManager};
 
 const CONFIG_EXITCODE: i32 = 78;
-const MIN_CLEANUP_RECURRENCE: u64 = 60*60*24; // 1 day
+const MIN_CLEANUP_RECURRENCE: u64 = 60 * 60 * 24; // 1 day
 const DEFAULT_CLEANUP_TIME: &str = "00:00"; // midnight
 
 #[tokio::main]
@@ -99,13 +99,6 @@ async fn run() -> Result<(), EdgedError> {
 
     let (create_socket_channel_snd, create_socket_channel_rcv) =
         tokio::sync::mpsc::unbounded_channel::<ModuleAction>();
-
-    /*let defaults = ImagePruneSettings::new(
-        Duration::from_secs(DEFAULT_RECURRENCE_IN_SECS)),
-        Duration::from_secs(DEFAULT_MIN_AGE_IN_SECS)),
-        DEFAULT_CLEANUP_TIME.to_string()),
-        true),
-    );*/
 
     let gc_settings = settings.image_garbage_collection();
 
@@ -288,9 +281,7 @@ fn set_signal_handlers(
     });
 }
 
-fn validate_settings(
-    settings: &ImagePruneSettings,
-) -> Result<(), ImageCleanupError> {
+fn validate_settings(settings: &ImagePruneSettings) -> Result<(), ImageCleanupError> {
     let recurrence = Duration::as_secs(&settings.cleanup_recurrence());
     let cleanup_time = DEFAULT_CLEANUP_TIME.to_string();
 
@@ -301,11 +292,11 @@ fn validate_settings(
     }
 
     let times = NaiveTime::parse_from_str(&cleanup_time, "%H:%M");
-        if times.is_err() {
-            return Err(ImageCleanupError::InvalidConfiguration(
-                "invalid cleanup time, expected format is \"HH:MM\" in 24-hour format".to_string(),
-            ));
-        }
+    if times.is_err() {
+        return Err(ImageCleanupError::InvalidConfiguration(
+            "invalid cleanup time, expected format is \"HH:MM\" in 24-hour format".to_string(),
+        ));
+    }
 
     Ok(())
 }
@@ -319,67 +310,39 @@ mod tests {
 
     #[test]
     fn test_validate_settings() {
-        let mut settings = ImagePruneSettings::new(
-            Duration::MAX,
-            Duration::MAX,
-            "12345".to_string(),
-            false,
-        );
+        let mut settings =
+            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "12345".to_string(), false);
 
         let mut result = validate_settings(&settings);
         assert!(result.is_err());
 
-        settings = ImagePruneSettings::new(
-            Duration::MAX,
-            Duration::MAX,
-            "abcde".to_string(),
-            false,
-        );
+        settings =
+            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "abcde".to_string(), false);
         result = validate_settings(&settings);
         assert!(result.is_err());
 
-        settings = ImagePruneSettings::new(
-            Duration::MAX,
-            Duration::MAX,
-            "26:30".to_string(),
-            false,
-        );
+        settings =
+            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "26:30".to_string(), false);
         result = validate_settings(&settings);
         assert!(result.is_err());
 
-        settings = ImagePruneSettings::new(
-            Duration::MAX,
-            Duration::MAX,
-            "16:61".to_string(),
-            false,
-        );
+        settings =
+            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "16:61".to_string(), false);
         result = validate_settings(&settings);
         assert!(result.is_err());
 
-        settings = ImagePruneSettings::new(
-            Duration::MAX,
-            Duration::MAX,
-            "23:333".to_string(),
-            false,
-        );
+        settings =
+            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "23:333".to_string(), false);
         result = validate_settings(&settings);
         assert!(result.is_err());
 
-        settings = ImagePruneSettings::new(
-            Duration::MAX,
-            Duration::MAX,
-            "2:033".to_string(),
-            false,
-        );
+        settings =
+            ImagePruneSettings::new(Duration::MAX, Duration::MAX, "2:033".to_string(), false);
         result = validate_settings(&settings);
         assert!(result.is_err());
 
-        settings = ImagePruneSettings::new(
-            Duration::MAX,
-            Duration::MAX,
-            ":::00".to_string(),
-            false,
-        );
+        settings =
+            ImagePruneSettings::new(Duration::MAX, Duration::MAX, ":::00".to_string(), false);
         result = validate_settings(&settings);
         assert!(result.is_err());
     }
