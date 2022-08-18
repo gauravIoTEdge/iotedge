@@ -19,9 +19,7 @@ pub async fn image_garbage_collect(
 ) -> Result<(), ImageCleanupError> {
     log::info!("Starting image garbage collection task...");
 
-    let is_enabled: bool = settings.is_enabled();
-
-    if !is_enabled {
+    if !settings.is_enabled() {
         return std::future::pending().await;
     }
 
