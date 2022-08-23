@@ -60,7 +60,7 @@ impl ImagePruneSettings {
     }
 
     pub fn is_default(value: &Self) -> bool {
-        true
+        value == &Self::default()
     }
 }
 
